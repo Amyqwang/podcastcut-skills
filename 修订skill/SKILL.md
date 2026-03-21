@@ -157,6 +157,49 @@ node ../../剪播客/scripts/run_fine_analysis.js --analysis-dir .
 diff fine_analysis_rules_OLD.json fine_analysis_rules.json | head -50
 ```
 
+### 3.4 A/B 对比页面
+
+当核心算法改动涉及**听感差异**（如静音处理、音质增强）时，生成 HTML 对比页面供人工试听验证。
+
+**页面功能：**
+- 左右并排加载旧版/新版音频，支持同步播放和独立播放
+- 顶部统计卡片：时长差异、编辑数变化、保留量对比
+- 差异列表：列出新版保留/旧版裁掉的所有位置，点击可跳转到该处试听
+- 详情表格：每条编辑的上下文类型、原时长、阈值、保留量
+
+**生成步骤：**
+
+1. 用旧逻辑跑一遍，保存旧版音频和 fine_analysis_rules_OLD.json
+2. 用新逻辑跑一遍，保存新版音频和 fine_analysis_rules.json
+3. 生成 A/B 对比 HTML：
+
+```bash
+# 在项目的剪播客输出目录下
+BASE_DIR="output/${DATE}_${AUDIO_NAME}/剪播客"
+
+# 生成对比页面（需提供新旧两版音频和分析 JSON）
+# 页面结构：
+#   - 旧版音频: 3_成品/xxx_v1_trimmed.mp3
+#   - 新版音频: 3_成品/xxx_新版_trimmed.mp3
+#   - 旧分析:   2_分析/fine_analysis_rules_OLD.json
+#   - 新分析:   2_分析/fine_analysis_rules.json
+#   - 输出:     ab_compare.html
+```
+
+4. 用浏览器打开对比页面：
+
+```bash
+open "$BASE_DIR/ab_compare.html"
+```
+
+**对比页面模板要点：**
+- 音频使用相对路径引用（`3_成品/xxx.mp3`），确保本地能播放
+- 同步播放按钮：点击后两个 audio 元素同步 seek 和 play/pause
+- 差异点跳转：根据新旧版本的时间偏移分别计算跳转位置
+- 统计数据从两份 JSON 中提取对比
+
+**参考实例：** `output/2026-03-15_公园路/剪播客/ab_compare.html`
+
 ---
 
 ## Phase 4: 合并与清理
