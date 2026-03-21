@@ -6,10 +6,10 @@
 
 set -e
 
-# 自动加载 .env（如果 DASHSCOPE_API_KEY 未设置）
-ENV_FILE="/Volumes/T9/claude_skill/podcastcut/.env"
-if [ -z "$DASHSCOPE_API_KEY" ] && [ -f "$ENV_FILE" ]; then
-  export $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | xargs)
+# 加载配置（自动检测项目根目录、加载 .env）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/../../scripts/config_loader.sh" ]; then
+  source "$SCRIPT_DIR/../../scripts/config_loader.sh"
 fi
 
 # 检查参数
@@ -31,7 +31,7 @@ if [ -z "$DASHSCOPE_API_KEY" ]; then
     echo "请设置API Key:"
     echo "  export DASHSCOPE_API_KEY='your-api-key'"
     echo ""
-    echo "或在 /Volumes/T9/claude_skill/podcastcut/.env 中配置"
+    echo "或在项目根目录的 .env 中配置"
     exit 1
 fi
 
