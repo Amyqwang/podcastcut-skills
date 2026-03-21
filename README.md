@@ -93,6 +93,7 @@ cp .env.example .env
     │
     │  阶段 5: 剪辑执行
     │  ├─ cut_audio.py（WAV 采样级精确剪辑）
+    │  ├─ enhance_audio.py（音质增强：降噪/EQ/压缩/响度归一化）
     │  └─ trim_silences.py（成品静音裁剪）
     │
 /podcastcut-质检
@@ -141,6 +142,7 @@ podcastcut/
 │   │   ├── generate_review_final.js      # 生成终审页面（阶段 8）
 │   │   ├── capture_final_feedback.js     # 终审反馈捕获
 │   │   ├── cut_audio.py                  # WAV 采样级精确剪辑
+│   │   ├── enhance_audio.py              # 音质增强（降噪/EQ/压缩/响度归一化）
 │   │   ├── trim_silences.py              # 成品静音裁剪
 │   │   ├── merge_llm_fine.js             # 合并精剪编辑
 │   │   └── user_manager.js              # 用户偏好管理
@@ -189,9 +191,10 @@ podcastcut/
 | 依赖 | 用途 | 安装方式 |
 |------|------|----------|
 | Node.js | 运行脚本 | `brew install node` |
-| FFmpeg | 音频处理 | `brew install ffmpeg` |
-| Python 3 | 音频剪辑 | macOS 自带 |
+| FFmpeg | 音频处理（剪辑/EQ/压缩/响度归一化） | `brew install ffmpeg` |
+| Python 3 | 音频剪辑 + 音质增强 | macOS 自带 |
 | 阿里云 DashScope API | 语音转录 + 说话人分离 | [申请 Key](https://dashscope.console.aliyun.com/) |
+| DeepFilterNet（可选） | 音质增强降噪（无则自动跳过） | `pip install deepfilternet` |
 
 ## License
 

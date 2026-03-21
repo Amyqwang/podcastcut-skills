@@ -94,6 +94,7 @@ output/
 阶段 5: 剪辑执行
     → 合并删除建议 + 精剪
     → cut_audio.py 一键生成精剪版
+    → enhance_audio.py 音质增强（降噪/EQ/压缩/响度归一化）
     → trim_silences.py 成品静音裁剪
     ↓
 阶段 6: AI 质检 → /podcastcut-质检
@@ -127,7 +128,7 @@ output/
 > "你是已有用户还是新用户？"
 
 ```bash
-cd /Volumes/T9/claude_skill/podcastcut/剪播客
+cd "$PODCASTCUT_DIR/剪播客"
 
 # 列出已有用户
 node scripts/user_manager.js list
@@ -193,7 +194,7 @@ open 用户偏好/<userId>/preferences.yaml          # 编辑意图层偏好
 # "我现在偏好激进删减"
 ```
 
-**偏好文件位置**：`/Volumes/T9/claude_skill/podcastcut/剪播客/用户偏好/<userId>/`
+**偏好文件位置**：`$PODCASTCUT_DIR/剪播客/用户偏好/<userId>/`
 
 ---
 
@@ -205,10 +206,14 @@ open 用户偏好/<userId>/preferences.yaml          # 编辑意图层偏好
 
 ```bash
 # 变量设置（根据实际音频调整）——后续所有步骤都依赖这些变量
-AUDIO_PATH="/path/to/播客.mp3"
-AUDIO_NAME=$(basename "$AUDIO_PATH" | sed 's/\.[^.]*$//')
+# AUDIO_INPUT 支持本地文件路径或 URL:
+#   - 本地文件: /path/to/播客.mp3, ~/Downloads/录制.mp4
+#   - 腾讯会议: https://meeting.tencent.com/v2/cloud-record/share?id=xxx
+#   - 直接媒体URL: https://example.com/audio.mp4
+AUDIO_INPUT="/path/to/播客.mp3"  # 或 URL
+AUDIO_NAME="节目名"  # 用于目录命名，从文件名提取或由用户提供
 DATE=$(date +%Y-%m-%d)
-SKILL_DIR="/Volumes/T9/claude_skill/podcastcut"
+SKILL_DIR="$PODCASTCUT_DIR"  # 自动检测，见 scripts/config_loader.sh
 BASE_DIR="$SKILL_DIR/output/${DATE}_${AUDIO_NAME}/剪播客"
 
 # 创建子目录
@@ -217,13 +222,14 @@ mkdir -p "$BASE_DIR/1_转录" "$BASE_DIR/2_分析" "$BASE_DIR/3_成品"
 
 ##### 准备音频
 
+> **支持 URL 和本地文件。** 统一使用 `download_audio.sh` 处理输入，它会自动判断：
+> - 本地文件 → 复制/转码
+> - 直接媒体 URL → curl 下载
+> - 腾讯会议等平台链接 → yt-dlp 下载（需 `brew install yt-dlp`）
+
 ```bash
-# 转换/复制原始音频用于转录
-if [[ "$AUDIO_PATH" == *.mp3 ]]; then
-  cp "$AUDIO_PATH" "$BASE_DIR/1_转录/audio.mp3"
-else
-  ffmpeg -i "file:$AUDIO_PATH" -vn -acodec libmp3lame -ar 16000 -ac 1 -y "$BASE_DIR/1_转录/audio.mp3"
-fi
+# 统一下载/准备脚本 — 自动处理本地文件和 URL
+bash "$SKILL_DIR/scripts/download_audio.sh" "$AUDIO_INPUT" "$BASE_DIR/1_转录"
 
 # ⚠️ 必须：重编码为 CBR MP3 供审查页面使用（精确 seek）
 # VBR MP3 在浏览器中 seek 会随位置偏移越来越大，导致点击句子播放错位
@@ -234,24 +240,24 @@ echo "✅ 音频已准备: audio.mp3 (转录用) + audio_seekable.mp3 (审查页
 
 > **审查页面必须使用 `audio_seekable.mp3`**。步骤 6 生成 HTML 时 `--audio` 参数传 `1_转录/audio_seekable.mp3`。
 
-##### 上传获取公网URL
+##### 音频中转（根据 config.yaml 自动选择策略）
+
+> **⚠️ 必须使用 `serve_audio.sh`，禁止直接调用 `upload_audio.sh`。**
+> `serve_audio.sh` 会读取 config.yaml 中的 `upload.strategy` 自动选择策略（默认 local_server，音频不离开本机）。
+> `upload_audio.sh` 是底层公网上传脚本，直接调用会绕过配置，将音频上传到公网，存在隐私风险。
 
 ```bash
-# 上传到uguu.se（24小时有效）
-UPLOAD_RESPONSE=$(curl -s -F "files[]=@$BASE_DIR/1_转录/audio.mp3" "https://uguu.se/upload?output=text")
-
-echo "✅ 音频已上传"
-echo "   URL: $UPLOAD_RESPONSE"
-
-# 保存URL供后续使用
-echo "$UPLOAD_RESPONSE" > "$BASE_DIR/1_转录/audio_url.txt"
-AUDIO_URL="$UPLOAD_RESPONSE"
+# 统一中转脚本 — 根据 config.yaml 的 upload.strategy 自动选择
+# ⚠️ 必须用 serve_audio.sh，不要用 upload_audio.sh
+bash "$SKILL_DIR/scripts/serve_audio.sh" "$BASE_DIR/1_转录/audio.mp3" "$BASE_DIR/1_转录/audio_url.txt"
+AUDIO_URL=$(cat "$BASE_DIR/1_转录/audio_url.txt")
 ```
 
-**注意**：
-- uguu.se文件24小时后自动删除
-- 如需长期保存，使用阿里云OSS或其他云存储
-- 确保URL可公网访问
+**策略说明**（在 config.yaml 中配置 `upload.strategy`）：
+- `local_server`（默认）：启动本地 HTTP 服务，音频不离开本机，隐私优先
+- `public`：上传到免费公共托管（uguu.se 等），24-48h 有效
+- `aliyun_oss`：上传到阿里云 OSS（私有）
+- `tencent_cos`：上传到腾讯云 COS（私有）
 
 ##### 转录 + 说话人映射 → subtitles_words.json
 
@@ -260,10 +266,10 @@ AUDIO_URL="$UPLOAD_RESPONSE"
 ```bash
 SPEAKER_COUNT=3  # ⚠️ 必须由用户提供（2人、3人等）
 
-# 3a. 调用阿里云API转录（~3分钟）
-# API Key 会自动从 .env 加载，无需手动 export
+# 3a. 统一转录入口 — 根据 config.yaml 的 asr.provider 自动选择
+# 支持: aliyun(默认) | tencent | local(计划中)
 cd "$BASE_DIR/1_转录"
-bash "$SKILL_DIR/剪播客/scripts/aliyun_funasr_transcribe.sh" "$AUDIO_URL" "$SPEAKER_COUNT"
+bash "$SKILL_DIR/剪播客/scripts/transcribe.sh" "$AUDIO_URL" "$SPEAKER_COUNT"
 # 生成: aliyun_funasr_transcription.json
 
 # 3b. 识别说话人身份（查看前20句）
@@ -925,7 +931,7 @@ node "$SKILL_DIR/剪播客/scripts/append_eval_history.js" \
 
 ### 阶段 5: 剪辑执行
 
-> **交互规范**：阶段 5 包含 5.1 + 5.2 两步，应**连续执行、统一汇报**。5.1 完成后不要向用户展示中间产物或报告，直接继续 5.2。全部完成后再告知用户最终成品路径和时长统计。
+> **交互规范**：阶段 5 包含 5.1 + 5.2 + 5.3 三步，应**连续执行、统一汇报**。中间步骤完成后不要向用户展示中间产物或报告，直接继续下一步。全部完成后再告知用户最终成品路径和时长统计。当 `config.yaml` 中 `audio_enhancement.enabled: false` 时跳过 5.2，行为与之前完全一致。
 
 #### 5.1 一键剪辑生成精剪版
 
@@ -962,7 +968,43 @@ python3 "$SKILL_DIR/剪播客/scripts/cut_audio.py" \
 
 ---
 
-#### 5.2 成品静音裁剪
+#### 5.2 音质增强（enhance_audio.py）
+
+对精剪版进行音质增强：高通滤波 → 降噪（DeepFilterNet，可选）→ EQ 均衡 → 压缩 → 限幅 → 响度归一化（EBU R128, -16 LUFS）。
+
+**三步处理流程**（避免 loudnorm 测量值错位）：
+- Step A: 全链处理（highpass → denoise → EQ → compress → limiter）→ 临时文件
+- Step B: 测量临时文件的 LUFS/TP/LRA
+- Step C: 对临时文件应用 loudnorm（线性模式，正确 measured 值）→ 最终输出
+
+```bash
+python3 "$SKILL_DIR/剪播客/scripts/enhance_audio.py" \
+  "$BASE_DIR/3_成品/${AUDIO_NAME}_精剪版_v1.mp3" \
+  "$BASE_DIR/3_成品/${AUDIO_NAME}_精剪版_v1_enhanced.mp3" \
+  --config "$SKILL_DIR/config.yaml"
+```
+
+> 当 `config.yaml` 中 `audio_enhancement.enabled: false` 时脚本自动跳过，输出不变。
+
+**预设**：
+| 预设 | 场景 | 特点 |
+|------|------|------|
+| `podcast`（默认） | 标准播客 | 降噪（有 DeepFilterNet 时）、轻度 EQ、3:1 压缩 |
+| `interview` | 远程连线/电话 | 更强降噪、更多清晰度提升、4:1 压缩 |
+| `minimal` | 专业录制环境 | 不降噪、轻度压缩、保持原始动态 |
+
+**可选参数**：
+- `--preset podcast|interview|minimal` — 覆盖 config 中的预设
+- `--preview` — 只处理前 30 秒预览，试听后再决定参数
+- `--dry-run` — 只测量当前音频指标，不处理
+- `--no-denoise` / `--no-eq` / `--no-compress` — 跳过单个步骤
+- `--deess` — 启用去齿音（实验性，默认关闭）
+
+**输出**：`3_成品/播客名_精剪版_v1_enhanced.mp3`
+
+---
+
+#### 5.3 成品静音裁剪
 
 剪辑成品后，删除内容前后的短静音会合并成超阈值的长停顿。**必须在成品上再扫一遍。**
 
@@ -972,10 +1014,13 @@ python3 "$SKILL_DIR/剪播客/scripts/cut_audio.py" \
 - **直接在成品音频上用 FFmpeg silencedetect 扫描最简单可靠**
 
 ```bash
+# 输入为 enhanced 版本（如启用了音质增强），否则为精剪版
 python3 "$SKILL_DIR/剪播客/scripts/trim_silences.py" \
-  "$BASE_DIR/3_成品/${AUDIO_NAME}_精剪版_v1.mp3"
+  "$BASE_DIR/3_成品/${AUDIO_NAME}_精剪版_v1_enhanced.mp3"
 # 默认: 检测 >0.8s 静音，裁剪到 0.6s
-# 输出: *_trimmed.mp3
+# 输出: *_enhanced_trimmed.mp3
+# 若未启用音质增强，仍用原始精剪版:
+# python3 trim_silences.py "$BASE_DIR/3_成品/${AUDIO_NAME}_精剪版_v1.mp3"
 
 # 自定义参数:
 python3 "$SKILL_DIR/剪播客/scripts/trim_silences.py" \
@@ -1007,7 +1052,8 @@ python3 "$SKILL_DIR/剪播客/scripts/trim_silences.py" \
 步骤7c: 反馈学习 🆕v5 → 分层更新 prompt + editing_rules
 步骤7d: 评估指标计算 🆕v5.1 → 自动计算 precision/recall → eval_history.json
 步骤8:  剪辑 → 播客名_精剪版_v1.mp3
-步骤8b: 成品静音裁剪 🆕 → 播客名_精剪版_v1_trimmed.mp3 🎉
+步骤8b: 音质增强 🆕 → 播客名_精剪版_v1_enhanced.mp3
+步骤8c: 成品静音裁剪 → 播客名_精剪版_v1_enhanced_trimmed.mp3 🎉
 步骤9b: 自动质检 🆕v5（可选）→ QA 报告
 步骤10: 后期处理 🆕v5（可选）→ 片头/时间戳/标题
 步骤11: 最终交付 🆕v5 → episode_history + 汇总
@@ -1153,7 +1199,7 @@ node -e "
 export DASHSCOPE_API_KEY="sk-your-api-key"
 
 # 方法2：.env文件
-cd /Volumes/T9/claude_skill/podcastcut
+cd "$PODCASTCUT_DIR"
 cat >> .env << 'EOF'
 DASHSCOPE_API_KEY=sk-your-api-key
 EOF

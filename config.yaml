@@ -1,0 +1,93 @@
+# Podcastcut 统一配置文件
+# 所有配置集中管理，避免硬编码路径和分散的环境变量
+
+# --- ASR 语音转录服务 ---
+asr:
+  # 可选: aliyun | tencent | local
+  provider: tencent
+
+  aliyun:
+    api_key_env: DASHSCOPE_API_KEY       # 从环境变量读取
+    model: fun-asr
+    # API 地址（通常不需要修改）
+    endpoint: https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription
+
+  tencent:
+    secret_id_env: TENCENT_SECRET_ID     # 从环境变量读取
+    secret_key_env: TENCENT_SECRET_KEY
+    engine_type: 16k_zh                  # 16k_zh | 8k_zh
+    # API 地址
+    endpoint: https://asr.tencentcloudapi.com
+
+  local:
+    # 本地 ASR 模型（未来扩展）
+    model: qwen3-asr-0.6b
+    device: cpu
+
+# --- 音频上传策略 ---
+upload:
+  # 可选: local_server | public | aliyun_oss | tencent_cos
+  strategy: local_server
+
+  local_server:
+    # 启动本地 HTTP 服务 + ngrok 隧道，音频不离开本机
+    port: 8765
+    use_ngrok: false                     # true 时自动创建公网隧道
+
+  public:
+    # 免费公共文件托管（uguu.se, 0x0.st 等）
+    # 注意: 音频会上传到公网，有隐私风险
+    services:
+      - uguu.se
+      - 0x0.st
+      - file.io
+      - tmpfiles.org
+      - catbox.moe
+
+  aliyun_oss:
+    access_key_id_env: OSS_ACCESS_KEY_ID
+    access_key_secret_env: OSS_ACCESS_KEY_SECRET
+    endpoint: oss-cn-shanghai.aliyuncs.com
+    bucket_name: ""
+
+  tencent_cos:
+    secret_id_env: TENCENT_SECRET_ID
+    secret_key_env: TENCENT_SECRET_KEY
+    region: ap-shanghai
+    bucket_name: ""
+
+# --- 质检 ---
+qa:
+  gemini_api_key_env: GEMINI_API_KEY     # 可选，Layer 2 AI 听感评估
+  semantic_review_enabled: false          # Phase C 语义层质检（开销大）
+
+# --- 路径（自动检测，一般不需要手动设置）---
+paths:
+  # project_root 会自动检测为 config.yaml 所在目录
+  # 如需手动指定，取消注释下面一行
+  # project_root: /Users/hhvan/AI/DC/podcastcut-skills
+  output_dir: ./output
+
+# --- 用户 ---
+user:
+  default_user: default
+  # 当前用户（也可通过环境变量 PODCASTCUT_USER 设置）
+  # current_user: default
+
+# --- 音质增强 ---
+audio_enhancement:
+  enabled: true                  # 默认启用
+  preset: podcast                # podcast | interview | minimal
+  steps:
+    highpass: true
+    denoise: true                # 受 denoise_strategy 控制
+    deess: false                 # 默认关闭（实验性）
+    eq: true
+    compress: true
+    limiter: true
+    loudnorm: true
+  denoise_strategy: auto         # auto(有DeepFilterNet就用,没有跳过) | deepfilter | ffmpeg | off
+  loudnorm:
+    target_lufs: -16
+    true_peak: -1.5
+    lra: 11
