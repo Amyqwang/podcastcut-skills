@@ -312,10 +312,21 @@ def analyze(audio_path, output_path=None):
         },
     }
 
-    # 输出
+    # 输出（将 numpy 类型转为 Python 原生类型）
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            import numpy as np
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return super().default(obj)
+
     if output_path:
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+            json.dump(report, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
         print(f"\nReport saved: {output_path}")
 
     # 打印摘要
