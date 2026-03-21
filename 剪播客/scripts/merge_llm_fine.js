@@ -16,6 +16,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  findGapSpeakers, buildSpeakerBaselines,
+  getAdaptiveThreshold, computeKeepDuration, classifyContext,
+} = require('./dialogue_silence_utils');
 
 // Parse args
 let analysisDir = process.cwd();
@@ -626,45 +630,58 @@ function isWordDeleted(w) {
   return false;
 }
 
-// Find gaps between consecutive kept words
+// Find gaps between consecutive kept words — dialogue-aware thresholds (via shared utils)
 const keptWords = actualWords.filter(w => !isWordDeleted(w));
-const SILENCE_THRESHOLD = 0.8; // from preferences or default
+
+const { speakerMedian: _spkMed, globalMedian: _globalMed, isDialogue: _isDialogue } = buildSpeakerBaselines(allWords);
+
 let gapEdits = [];
 
 for (let i = 1; i < keptWords.length; i++) {
-  const gap = keptWords[i].start - keptWords[i - 1].end;
-  if (gap > SILENCE_THRESHOLD) {
-    const trimStart = parseFloat((keptWords[i - 1].end + SILENCE_THRESHOLD).toFixed(3));
-    const trimEnd = parseFloat(keptWords[i].start.toFixed(3));
-    const trimDur = parseFloat((trimEnd - trimStart).toFixed(3));
-    if (trimDur < 0.05) continue;
+  const gapDur = keptWords[i].start - keptWords[i - 1].end;
+  if (gapDur < 0.5) continue;
 
-    // Skip if already covered by an existing edit
-    const alreadyCovered = merged.some(e => {
-      const eStart = e.deleteStart ?? e.ds ?? 0;
-      const eEnd = e.deleteEnd ?? e.de ?? 0;
-      return Math.abs(eStart - trimStart) < 0.05 && Math.abs(eEnd - trimEnd) < 0.05;
-    });
-    if (alreadyCovered) continue;
+  const prevSpk = keptWords[i - 1].speaker;
+  const nextSpk = keptWords[i].speaker;
+  const context = classifyContext(_isDialogue, prevSpk, nextSpk, false);
 
-    // Find sentence index
-    let sentIdx = -1;
-    for (const sent of sentences) {
-      if (keptWords[i - 1].start >= sent.startTime - 0.01 && keptWords[i - 1].end <= sent.endTime + 0.01) {
-        sentIdx = sent.idx;
-        break;
-      }
+  const baseMed = (prevSpk && _spkMed[prevSpk]) || _globalMed;
+  const { threshold, keepCeiling } = getAdaptiveThreshold(baseMed, context);
+
+  if (gapDur <= threshold) continue;
+
+  const keepDuration = computeKeepDuration(gapDur, threshold, keepCeiling);
+  const trimStart = parseFloat((keptWords[i - 1].end + keepDuration).toFixed(3));
+  const trimEnd = parseFloat(keptWords[i].start.toFixed(3));
+  const trimDur = parseFloat((trimEnd - trimStart).toFixed(3));
+  if (trimDur < 0.05) continue;
+
+  // Skip if already covered by an existing edit
+  const alreadyCovered = merged.some(e => {
+    const eStart = e.deleteStart ?? e.ds ?? 0;
+    const eEnd = e.deleteEnd ?? e.de ?? 0;
+    return Math.abs(eStart - trimStart) < 0.05 && Math.abs(eEnd - trimEnd) < 0.05;
+  });
+  if (alreadyCovered) continue;
+
+  // Find sentence index
+  let sentIdx = -1;
+  for (const sent of sentences) {
+    if (keptWords[i - 1].start >= sent.startTime - 0.01 && keptWords[i - 1].end <= sent.endTime + 0.01) {
+      sentIdx = sent.idx;
+      break;
     }
-
-    gapEdits.push({
-      sentenceIdx: sentIdx,
-      type: 'silence_merged',
-      deleteStart: trimStart,
-      deleteEnd: trimEnd,
-      duration: trimDur,
-      reason: `删除合并后间隙${gap.toFixed(2)}s→保留${SILENCE_THRESHOLD}s`
-    });
   }
+
+  gapEdits.push({
+    sentenceIdx: sentIdx,
+    type: 'silence_merged',
+    deleteStart: trimStart,
+    deleteEnd: trimEnd,
+    duration: trimDur,
+    context,
+    reason: `合并后${context}间隙${gapDur.toFixed(2)}s，压缩保留${keepDuration.toFixed(1)}s`
+  });
 }
 
 if (gapEdits.length > 0) {

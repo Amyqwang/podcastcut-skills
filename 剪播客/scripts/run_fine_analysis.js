@@ -13,6 +13,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  findGapSpeakers, buildSpeakerBaselines,
+  getAdaptiveThreshold, computeKeepDuration, classifyContext,
+} = require('./dialogue_silence_utils');
 
 // Parse args (same convention as merge_llm_fine.js)
 let analysisDir = process.cwd();
@@ -38,9 +42,12 @@ const deletedSentences = new Set(
 const actualWords = allWords.filter(w => !w.isGap && !w.isSpeakerLabel);
 const gaps = allWords.filter(w => w.isGap);
 
-// User preferences
-const SILENCE_THRESHOLD = 0.8;
-const SILENCE_CAP = 0.8;
+// === Dialogue-aware silence: adaptive thresholds ===
+// Instead of fixed 0.8s for all gaps, we:
+// 1. Calculate each speaker's natural rhythm (median gap)
+// 2. Use context (same/cross speaker, after question) to set threshold
+// 3. Compress proportionally (not fixed cap) to preserve rhythm variation
+// 4. Cut from gap END to protect breathing at gap start
 
 // === Stutter exemption tiers ===
 
@@ -97,11 +104,51 @@ function getNextSentenceStart(sentIdx) {
   return sentences[sentIdx].endTime;
 }
 
-// === RULE: Silence detection (>0.8s) ===
-for (const gap of gaps) {
-  const duration = gap.end - gap.start;
-  if (duration <= SILENCE_THRESHOLD) continue;
+// === DIALOGUE-AWARE silence detection (via shared utils) ===
 
+const { speakerMedian, globalMedian, isDialogue, speakerSampleCounts } = buildSpeakerBaselines(allWords);
+
+console.log(`📊 Speaker rhythm baselines (${isDialogue ? 'dialogue' : 'solo'} mode):`);
+for (const [speaker, med] of Object.entries(speakerMedian)) {
+  console.log(`   ${speaker}: median gap ${med.toFixed(2)}s (${speakerSampleCounts[speaker]} samples)`);
+}
+console.log(`   Global median: ${globalMedian.toFixed(2)}s`);
+
+// Helper: check if gap follows a question
+function isAfterQuestion(gapStart) {
+  for (let i = sentences.length - 1; i >= 0; i--) {
+    if (deletedSentences.has(sentences[i].idx)) continue;
+    if (sentences[i].endTime <= gapStart + 0.2) {
+      return /[？?]/.test(sentences[i].text);
+    }
+  }
+  return false;
+}
+
+// Step 2: Process each gap with context awareness
+for (let gi = 0; gi < allWords.length; gi++) {
+  if (!allWords[gi].isGap) continue;
+  const gap = allWords[gi];
+  const duration = gap.end - gap.start;
+  if (duration < 0.3) continue;
+
+  const { prevSpeaker, nextSpeaker } = findGapSpeakers(allWords, gi);
+  const afterQuestion = isAfterQuestion(gap.start);
+  const context = classifyContext(isDialogue, prevSpeaker, nextSpeaker, afterQuestion);
+
+  const baseMedian = (prevSpeaker && speakerMedian[prevSpeaker]) || globalMedian;
+  const { threshold, keepCeiling } = getAdaptiveThreshold(baseMedian, context);
+
+  if (duration <= threshold) continue;
+
+  const keepDuration = computeKeepDuration(duration, threshold, keepCeiling);
+
+  // Cut from END of gap — breathing lives at the start
+  const deleteStart = gap.start + keepDuration;
+  const deleteEnd = gap.end;
+  if (deleteEnd - deleteStart < 0.1) continue;
+
+  // Find owning sentence
   let sentIdx = -1;
   for (let i = 0; i < sentences.length; i++) {
     if (deletedSentences.has(i)) continue;
@@ -112,20 +159,18 @@ for (const gap of gaps) {
   }
   if (sentIdx < 0 || deletedSentences.has(sentIdx)) continue;
 
-  const deleteStart = gap.start + SILENCE_CAP;
-  const deleteEnd = gap.end;
-  if (deleteEnd - deleteStart < 0.1) continue;
-
   edits.push({
     idx: editIdx++,
     sentenceIdx: sentIdx,
     type: 'silence',
     rule: '3-静音段处理',
-    duration: parseFloat(duration.toFixed(1)),
-    deleteStart: parseFloat(gap.start.toFixed(2)),
-    deleteEnd: parseFloat(gap.end.toFixed(2)),
-    keepDuration: SILENCE_CAP,
-    reason: `静音${duration.toFixed(1)}秒，cap到${SILENCE_CAP}秒`
+    duration: parseFloat(duration.toFixed(2)),
+    deleteStart: parseFloat(deleteStart.toFixed(2)),
+    deleteEnd: parseFloat(deleteEnd.toFixed(2)),
+    keepDuration: parseFloat(keepDuration.toFixed(2)),
+    context,
+    threshold: parseFloat(threshold.toFixed(2)),
+    reason: `${context}停顿${duration.toFixed(1)}s（阈值${threshold.toFixed(1)}s），压缩保留${keepDuration.toFixed(1)}s`
   });
 }
 
@@ -322,6 +367,41 @@ for (const sent of sentences) {
 
 // Sort edits by time
 edits.sort((a, b) => a.deleteStart - b.deleteStart);
+
+// === Rhythm guard: prevent over-trimming in dense sections ===
+// If 3+ silence edits cluster within 30s, the section will feel "rushed"
+// after trimming. Restore every-other middle edit to keep pacing varied.
+const silenceEditsForGuard = edits
+  .map((e, i) => ({ e, origIdx: i }))
+  .filter(x => x.e.type === 'silence');
+
+const restoreIndices = new Set();
+for (let i = 0; i < silenceEditsForGuard.length; i++) {
+  // Collect cluster: consecutive silence edits within 30s window
+  const cluster = [i];
+  for (let j = i + 1; j < silenceEditsForGuard.length; j++) {
+    if (silenceEditsForGuard[j].e.deleteStart - silenceEditsForGuard[i].e.deleteStart <= 30) {
+      cluster.push(j);
+    } else break;
+  }
+  if (cluster.length >= 3) {
+    // Restore every other middle edit (keep first and last of cluster)
+    for (let k = 1; k < cluster.length - 1; k += 2) {
+      restoreIndices.add(silenceEditsForGuard[cluster[k]].origIdx);
+    }
+    i = cluster[cluster.length - 1]; // skip past this cluster
+  }
+}
+
+if (restoreIndices.size > 0) {
+  // Remove restored edits (iterate in reverse to preserve indices)
+  const sorted = [...restoreIndices].sort((a, b) => b - a);
+  for (const idx of sorted) {
+    edits.splice(idx, 1);
+  }
+  console.log(`🎵 Rhythm guard: restored ${restoreIndices.size} silence edits to preserve natural pacing`);
+}
+
 edits.forEach((e, i) => e.idx = i);
 
 // Summary
