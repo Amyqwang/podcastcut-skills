@@ -6,10 +6,10 @@
 
 ## 已知未修复 Bug
 
-- [ ] **陷阱18 — stutter toggle 阻塞**：切换 stutter 删除状态时可能阻塞 UI
-- [ ] **陷阱19 — stutter cancel 仍显示删除样式**：取消 stutter 后视觉上仍然显示为删除
-- [ ] **陷阱20 — 拼接伪影**：FFmpeg 剪切点可能产生音频伪影
-- [ ] **陷阱21 — 未标记的删除**：部分删除操作没有在审查页显示标记
+- [x] **陷阱18 — stutter toggle 阻塞**：切换 stutter 删除状态时可能阻塞 UI。已修复：用 segmentById O(1) 查找替代线性扫描，updateSummaryFooter 加 debounce(200ms)，移除重复 autoSave 调用。
+- [x] **陷阱19 — stutter cancel 仍显示删除样式**：取消 stutter 后视觉上仍然显示为删除。已修复：rebuildRowText 补充了 extraFineEdits 的渲染逻辑，使用与 buildTranscript 一致的统一删除标记算法。
+- [x] **陷阱20 — 拼接伪影**：FFmpeg 剪切点可能产生音频伪影。已修复：极短片段(<0.3s)也加 3ms 最小 fade；提取片段时扩展范围让 fade 有真实音频做过渡（而非从静音淡入）。
+- [x] **陷阱21 — 未标记的删除**：部分删除操作没有在审查页显示标记。已修复：在 buildTranscript 和 rebuildRowText 中为 incomingSilences（句首停顿删除）添加视觉标记。
 
 ## 精剪规则待完善
 
