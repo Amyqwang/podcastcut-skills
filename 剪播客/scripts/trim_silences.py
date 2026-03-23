@@ -189,8 +189,9 @@ def main():
     filter_parts.append(f'{concat_inputs}concat=n={len(keep_segments)}:v=0:a=1[out]')
 
     filter_script = ';\n'.join(filter_parts)
-    filter_file = '/tmp/_trim_silences_filter.txt'
-    with open(filter_file, 'w') as f:
+    import tempfile
+    fd, filter_file = tempfile.mkstemp(prefix='trim_silences_', suffix='.txt')
+    with os.fdopen(fd, 'w') as f:
         f.write(filter_script)
 
     # 确保不写入同一文件

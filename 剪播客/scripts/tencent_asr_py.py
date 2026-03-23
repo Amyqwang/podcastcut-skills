@@ -4,7 +4,7 @@
 用法: python3 tencent_asr_py.py <音频URL> <说话人数量>
 输出: tencent_asr_result.json → aliyun_funasr_transcription.json (兼容格式)
 """
-import sys, os, json, time, hmac, hashlib, http.client
+import sys, os, json, time, hmac, hashlib, http.client, subprocess
 
 def sign(key, msg):
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
@@ -116,7 +116,7 @@ def main():
             script_dir = os.path.dirname(os.path.abspath(__file__))
             adapter = os.path.join(script_dir, "tencent_to_aliyun_adapter.js")
             if os.path.exists(adapter):
-                os.system(f'node "{adapter}" tencent_asr_result.json')
+                subprocess.run(['node', adapter, 'tencent_asr_result.json'], check=True)
                 print("   已保存: aliyun_funasr_transcription.json (兼容格式)")
             return
         elif status == 3:

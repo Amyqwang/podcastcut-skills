@@ -42,22 +42,21 @@ echo "   音频URL: $AUDIO_URL"
 echo "   说话人数: $SPEAKER_COUNT"
 echo ""
 
+# 构建安全的 JSON 请求体（避免 shell 变量注入）
+REQUEST_BODY=$(node -e "
+  console.log(JSON.stringify({
+    model: 'fun-asr',
+    input: { file_urls: [process.argv[1]] },
+    parameters: { diarization_enabled: true, speaker_count: parseInt(process.argv[2]), channel_id: [0] }
+  }))
+" "$AUDIO_URL" "$SPEAKER_COUNT")
+
 # 提交任务
 RESPONSE=$(curl -s -X POST "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -H "X-DashScope-Async: enable" \
-  -d '{
-    "model": "fun-asr",
-    "input": {
-      "file_urls": ["'"$AUDIO_URL"'"]
-    },
-    "parameters": {
-      "diarization_enabled": true,
-      "speaker_count": '$SPEAKER_COUNT',
-      "channel_id": [0]
-    }
-  }')
+  -d "$REQUEST_BODY")
 
 # 检查提交结果
 TASK_ID=$(echo "$RESPONSE" | grep -o '"task_id":"[^"]*"' | cut -d'"' -f4)
