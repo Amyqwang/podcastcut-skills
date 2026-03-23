@@ -95,10 +95,25 @@ function getCurrentUser() {
 }
 
 /**
+ * 校验用户 ID（防止路径遍历）
+ */
+function validateUserId(userId) {
+  if (!userId) return;
+  if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(userId)) {
+    throw new Error(`用户 ID 不合法（只允许字母、数字、下划线、中划线、中文）: "${userId}"`);
+  }
+  if (userId.includes('..') || userId.includes('/') || userId.includes('\\')) {
+    throw new Error(`用户 ID 包含非法路径字符: "${userId}"`);
+  }
+}
+
+/**
  * 获取用户偏好目录的绝对路径
  */
 function getUserConfigPath(userId) {
-  return path.join(CONFIG_DIR, userId || getCurrentUser());
+  const id = userId || getCurrentUser();
+  validateUserId(id);
+  return path.join(CONFIG_DIR, id);
 }
 
 /**

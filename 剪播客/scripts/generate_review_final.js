@@ -268,7 +268,8 @@ function generateHtml(issues, audioPath, qaReport, auditReport, semanticReport) 
     ? formatTime(qaReport.duration_seconds)
     : '--:--';
 
-  const issuesJson = JSON.stringify(issues);
+  // 转义 </script> 防止 XSS 注入
+  const issuesJson = JSON.stringify(issues).replace(/<\//g, '<\\/');
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">

@@ -341,9 +341,13 @@ const speakerClassExpr = speakerClassParts.join(' : ');
 console.log('📝 生成 HTML...');
 let template = fs.readFileSync(templateFile, 'utf8');
 
-const dataJson = JSON.stringify(sentencesData);
+// 转义 </script> 防止 XSS 注入
+function safeJsonForHtml(obj) {
+  return JSON.stringify(obj).replace(/<\//g, '<\\/');
+}
+const dataJson = safeJsonForHtml(sentencesData);
 template = template.replace('__SENTENCES_DATA__', dataJson);
-template = template.replace('__BLOCKS_DATA__', JSON.stringify(blocksDataArr));
+template = template.replace('__BLOCKS_DATA__', safeJsonForHtml(blocksDataArr));
 template = template.replace('__AI_DELETED_COUNT__', String(deletedCount + suggestedCount));
 template = template.replace('__AI_SUGGESTED_COUNT__', String(suggestedCount));
 template = template.replace('__TOTAL_SENTENCES__', String(totalSentences));

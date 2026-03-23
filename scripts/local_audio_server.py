@@ -110,7 +110,7 @@ def main():
     AudioHandler.audio_path = audio_path
     AudioHandler.audio_filename = audio_filename
 
-    bind_addr = '0.0.0.0' if args.ngrok else '127.0.0.1'
+    bind_addr = '127.0.0.1'  # 始终绑定本地，ngrok 自行处理端口转发
     server = http.server.HTTPServer((bind_addr, args.port), AudioHandler)
 
     local_url = f'http://localhost:{args.port}/{audio_filename}'
