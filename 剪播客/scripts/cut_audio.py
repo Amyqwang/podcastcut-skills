@@ -31,13 +31,14 @@ def calc_fade_duration(segment_duration):
     自适应淡入淡出时长，和片段长度挂钩。
 
     规则：
-    - 极短片段 (< 0.3s): 不加 fade（太短会失真）
+    - 极短片段 (< 0.3s): fade = 3ms（防止波形不连续的 click 伪影）
     - 短片段 (0.3-2s):  fade = 段长 × 8%，最少 0.03s
     - 中片段 (2-8s):    fade = 0.15 ~ 0.25s
     - 长片段 (> 8s):    fade = 0.3s（上限）
     """
     if segment_duration < 0.3:
-        return 0.0
+        # 陷阱20 fix: 极短片段也需最小 fade 防止拼接伪影（click/pop 声）
+        return 0.003
     fade = min(segment_duration * 0.08, 0.3)
     return max(fade, 0.03)
 
@@ -409,10 +410,12 @@ def main():
     subprocess.run(cmd, check=True)
 
     # 编码为 MP3
-    print("🔧 编码为 MP3...")
+    # 陷阱20 fix: 添加 aresample=async=1 平滑拼接点的采样不连续，消除 click/pop 伪影
+    print("🔧 编码为 MP3（带拼接点平滑处理）...")
     cmd = [
         'ffmpeg', '-v', 'quiet', '-stats',
         '-i', temp_concat,
+        '-af', 'aresample=async=1',
         '-c:a', 'libmp3lame', '-b:a', '64k',
         '-y', output_name
     ]

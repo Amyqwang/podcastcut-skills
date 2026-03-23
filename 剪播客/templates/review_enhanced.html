@@ -1534,6 +1534,18 @@ function buildTranscript() {
       });
     }
 
+    // Render incomingSilences markers at the start of text (陷阱21 fix: deletions were unmarked)
+    if (s.incomingSilences && s.incomingSilences.length > 0) {
+      let incomingHtml = '';
+      s.incomingSilences.forEach(is => {
+        const isDisabled = fineEditsDisabled.has(is.idx);
+        const silClass = isDisabled ? 'incoming-silence disabled' : 'incoming-silence';
+        const dur = ((is.de || 0) - (is.ds || 0)).toFixed(1);
+        incomingHtml += `<span class="${silClass}" data-fine-idx="${is.idx}" onclick="event.stopPropagation(); toggleFineEdit(${is.idx})" title="句前停顿 ${dur}s — 点击切换">[${dur}s]</span>`;
+      });
+      textHtml = incomingHtml + textHtml;
+    }
+
     const textClass = isDeleted ? 's-text deleted-text' : 's-text';
     html += `<div class="${textClass}">${textHtml}</div>`;
 
@@ -1850,8 +1862,8 @@ function toggleFineEdit(feIdx) {
   const sel = window.getSelection();
   if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return;
 
-  // Find segment by feIdx
-  const seg = segments.find(s => s.feIdx === feIdx);
+  // Find segment by feIdx — use segmentById for O(1) lookup instead of linear scan
+  const seg = segmentById['fe-' + feIdx] || segmentById['sil-' + feIdx];
   if (!seg) return;
 
   undoStack.push({
@@ -1868,7 +1880,7 @@ function toggleFineEdit(feIdx) {
     rebuildRowText(s);
   }
   updateStats();
-  autoSave();
+  // Note: autoSave() already called inside updateStats(), no need to call again
 
   // Show restore feedback when disabling a fine edit (= restoring deleted content)
   if (!seg.enabled && s) {
@@ -1901,7 +1913,6 @@ function rebuildRowText(s) {
 
   let textHtml = '';
   const feClass = feDisabled ? 'fine-tag disabled' : 'fine-tag';
-  const delClass = feDisabled ? 'fine-delete disabled' : 'fine-delete';
 
   if (fe.type === 'silence') {
     const dur = (fe.de || 0) - (fe.ds || 0);
@@ -1910,19 +1921,55 @@ function rebuildRowText(s) {
     textHtml += escapeHtml(s.text);
     textHtml += ` <span class="${pauseClass}" data-fine-idx="${fe.idx}" onclick="event.stopPropagation(); toggleFineEdit(${fe.idx})" title="静音${dur.toFixed(1)}s → 保留0.8s，删${deleteDur.toFixed(1)}s — 点击切换">-${deleteDur.toFixed(1)}s</span>`;
   } else {
+    // Render primary fine edit tag
     textHtml += `<span class="${feClass}" data-fine-idx="${fe.idx}" onclick="event.stopPropagation(); toggleFineEdit(${fe.idx})" title="${escapeHtml(fe.reason)}">${escapeHtml(fe.type)}</span>`;
 
-    if (fe.deleteText) {
-      const escapedText = escapeHtml(s.text);
-      const escapedDel = escapeHtml(fe.deleteText);
-      const pos = (fe.charOffset !== undefined) ? fe.charOffset : escapedText.indexOf(escapedDel);
-      if (pos >= 0 && pos + escapedDel.length <= escapedText.length) {
-        textHtml += escapedText.substring(0, pos);
-        textHtml += `<span class="${delClass}" onclick="event.stopPropagation(); toggleFineEdit(${fe.idx})" title="点击切换保留/删除">${escapedDel}</span>`;
-        textHtml += escapedText.substring(pos + escapedDel.length);
-      } else {
-        textHtml += escapedText;
+    // Render extra fine edit tags (陷阱19 fix: was missing, causing stale delete styles after cancel)
+    if (s.extraFineEdits && s.extraFineEdits.length > 0) {
+      for (const efe of s.extraFineEdits) {
+        const efeDisabled = fineEditsDisabled.has(efe.idx);
+        const efeClass = efeDisabled ? 'fine-tag disabled' : 'fine-tag';
+        textHtml += `<span class="${efeClass}" data-fine-idx="${efe.idx}" onclick="event.stopPropagation(); toggleFineEdit(${efe.idx})" title="${escapeHtml(efe.reason || '')}">${escapeHtml(efe.type)}</span>`;
       }
+    }
+
+    // Collect ALL text deletions (primary + extra) for unified rendering
+    // This mirrors the logic in buildTranscript to handle multi-stutter sentences
+    if (fe.deleteText || (s.extraFineEdits && s.extraFineEdits.some(efe => efe.deleteText))) {
+      const allTextDels = [];
+
+      // Primary fine edit deletion
+      if (fe.deleteText) {
+        const pos0 = (fe.charOffset !== undefined) ? fe.charOffset : s.text.indexOf(fe.deleteText);
+        if (pos0 >= 0 && pos0 + fe.deleteText.length <= s.text.length) {
+          allTextDels.push({ start: pos0, end: pos0 + fe.deleteText.length, feIdx: fe.idx, disabled: fineEditsDisabled.has(fe.idx) });
+        }
+      }
+
+      // Extra fine edit deletions
+      if (s.extraFineEdits && s.extraFineEdits.length > 0) {
+        for (const efe of s.extraFineEdits) {
+          if (!efe.deleteText) continue;
+          const efeDisabled = fineEditsDisabled.has(efe.idx);
+          const efePos = (efe.charOffset !== undefined) ? efe.charOffset : s.text.indexOf(efe.deleteText);
+          if (efePos >= 0 && efePos + efe.deleteText.length <= s.text.length) {
+            allTextDels.push({ start: efePos, end: efePos + efe.deleteText.length, feIdx: efe.idx, disabled: efeDisabled });
+          }
+        }
+      }
+
+      // Sort by position and render non-overlapping
+      allTextDels.sort((a, b) => a.start - b.start);
+      const escapedText = escapeHtml(s.text);
+      let lastPos = 0;
+      for (const d of allTextDels) {
+        if (d.start < lastPos) continue; // skip overlapping
+        textHtml += escapedText.substring(lastPos, d.start);
+        const dClass = d.disabled ? 'fine-delete disabled' : 'fine-delete';
+        textHtml += `<span class="${dClass}" onclick="event.stopPropagation(); toggleFineEdit(${d.feIdx})" title="点击切换保留/删除">${escapedText.substring(d.start, d.end)}</span>`;
+        lastPos = d.end;
+      }
+      textHtml += escapedText.substring(lastPos);
     } else {
       textHtml += escapeHtml(s.text);
     }
@@ -1940,10 +1987,21 @@ function rebuildRowText(s) {
     });
   }
 
+  // Render incomingSilences markers (陷阱21 fix: was missing in rebuild)
+  if (s.incomingSilences && s.incomingSilences.length > 0) {
+    s.incomingSilences.forEach(is => {
+      const isDisabled = fineEditsDisabled.has(is.idx);
+      const silClass = isDisabled ? 'incoming-silence disabled' : 'incoming-silence';
+      const dur = ((is.de || 0) - (is.ds || 0)).toFixed(1);
+      textHtml = `<span class="${silClass}" data-fine-idx="${is.idx}" onclick="event.stopPropagation(); toggleFineEdit(${is.idx})" title="句前停顿 ${dur}s — 点击切换">[${dur}s]</span>` + textHtml;
+    });
+  }
+
   textEl.innerHTML = textHtml;
 }
 
 // ===== UPDATE STATS =====
+let _summaryFooterTimer = null;
 function updateStats() {
   const addCount = userAddedDeletions.size;
   const removeCount = userRemovedDeletions.size;
@@ -1952,7 +2010,9 @@ function updateStats() {
   document.getElementById('stat-user-add').textContent = '+' + addCount;
   document.getElementById('stat-user-remove').textContent = '-' + removeCount;
   document.getElementById('stat-final-delete').textContent = finalDelete;
-  updateSummaryFooter();
+  // Debounce summary footer update (heavy: iterates all sentences + blocks)
+  if (_summaryFooterTimer) clearTimeout(_summaryFooterTimer);
+  _summaryFooterTimer = setTimeout(updateSummaryFooter, 200);
   autoSave();
 }
 
