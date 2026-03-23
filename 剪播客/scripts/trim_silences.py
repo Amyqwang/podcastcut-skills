@@ -97,6 +97,7 @@ def main():
     threshold = 0.8
     target = 0.6
     noise_db = -30
+    params_from = None
 
     i = 1
     while i < len(sys.argv):
@@ -109,12 +110,29 @@ def main():
         elif sys.argv[i] == '--noise' and i + 1 < len(sys.argv):
             noise_db = float(sys.argv[i + 1])
             i += 2
+        elif sys.argv[i] == '--params-from' and i + 1 < len(sys.argv):
+            params_from = sys.argv[i + 1]
+            i += 2
         else:
             positional.append(sys.argv[i])
             i += 1
 
+    # Auto-detect params from trim_params.json (written by merge_llm_fine.js)
+    # --threshold/--target flags override auto-detected values
+    has_explicit_threshold = '--threshold' in sys.argv
+    has_explicit_target = '--target' in sys.argv
+    if params_from and os.path.exists(params_from):
+        with open(params_from) as f:
+            params = json.load(f)
+        if not has_explicit_threshold and 'threshold' in params:
+            threshold = params['threshold']
+        if not has_explicit_target and 'target' in params:
+            target = params['target']
+        mode = params.get('mode', 'unknown')
+        print(f"📋 Auto-detected {mode} mode from {os.path.basename(params_from)}")
+
     if not positional:
-        print("用法: python3 trim_silences.py input.mp3 [output.mp3] [--threshold 0.8] [--target 0.6] [--noise -30]")
+        print("用法: python3 trim_silences.py input.mp3 [output.mp3] [--params-from trim_params.json] [--threshold 0.8] [--target 0.6] [--noise -30]")
         sys.exit(1)
 
     input_file = positional[0]

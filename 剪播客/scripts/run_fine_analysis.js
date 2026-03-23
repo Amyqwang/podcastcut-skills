@@ -82,15 +82,17 @@ const ENGLISH_WORD = /^[A-Za-z]+$/;
 // Parse sentences
 const sentences = sentenceLines.map(line => {
   const parts = line.split('|');
-  const [startIdx, endIdx] = parts[1].split('-').map(Number);
+  const [rawStart, rawEnd] = parts[1].split('-').map(Number);
+  const startIdx = Math.max(0, Math.min(rawStart, actualWords.length - 1));
+  const endIdx = Math.max(0, Math.min(rawEnd, actualWords.length - 1));
   return {
     idx: parseInt(parts[0]),
     wordRange: [startIdx, endIdx],
     speaker: parts[2],
     text: parts[3],
     words: actualWords.slice(startIdx, endIdx + 1),
-    startTime: actualWords[startIdx] ? actualWords[startIdx].start : 0,
-    endTime: actualWords[endIdx] ? actualWords[endIdx].end : 0,
+    startTime: actualWords[startIdx].start,
+    endTime: actualWords[endIdx].end,
   };
 });
 
@@ -434,6 +436,26 @@ console.log(`✅ Rules layer complete: ${outputPath}`);
 console.log(`   Total edits: ${edits.length} (${needsReviewCount} needsReview → LLM decides)`);
 console.log(`   By type:`, JSON.stringify(byType));
 console.log(`   Estimated time saved: ${result.summary.estimatedTimeSaved}`);
+
+// Silence analysis summary (algorithm decision visibility)
+const silenceEdits = edits.filter(e => e.type === 'silence');
+if (silenceEdits.length > 0) {
+  const contextCounts = {};
+  const keepDurations = new Set();
+  for (const e of silenceEdits) {
+    contextCounts[e.context] = (contextCounts[e.context] || 0) + 1;
+    keepDurations.add(e.keepDuration);
+  }
+  const kdSorted = [...keepDurations].sort((a, b) => a - b);
+  const contextStr = Object.entries(contextCounts).map(([k, v]) => `${k} ${v}`).join(', ');
+  console.log(`\n📊 Silence analysis summary:`);
+  for (const [speaker, med] of Object.entries(speakerMedian)) {
+    console.log(`   ${speaker}: median ${med.toFixed(2)}s, ${speakerSampleCounts[speaker]} gaps`);
+  }
+  console.log(`   Edits: ${contextStr} → total ${silenceEdits.length}`);
+  console.log(`   keepDuration range: ${kdSorted[0].toFixed(2)}s ~ ${kdSorted[kdSorted.length - 1].toFixed(2)}s (${kdSorted.length} unique values)`);
+  console.log(`   Rhythm guard restored: ${restoreIndices.size}`);
+}
 
 // Show needsReview items for visibility
 if (needsReviewCount > 0) {

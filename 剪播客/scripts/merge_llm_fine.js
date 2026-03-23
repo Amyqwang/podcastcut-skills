@@ -729,10 +729,21 @@ const result = {
 };
 
 fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+
+// Write trim_silences params for downstream auto-detection
+const trimParams = _isDialogue
+  ? { threshold: 1.0, target: 0.7, mode: 'dialogue' }
+  : { threshold: 0.8, target: 0.6, mode: 'solo' };
+const trimParamsPath = path.join(analysisDir, 'trim_params.json');
+fs.writeFileSync(trimParamsPath, JSON.stringify(trimParams, null, 2));
+console.log(`📝 trim_params.json: ${trimParams.mode} mode (threshold=${trimParams.threshold}, target=${trimParams.target})`);
+
 console.log(`\n✅ Merged fine analysis: ${outputPath}`);
 console.log(`   Rules: ${rulesEdits.length} + LLM: ${llmEdits.length} + Gap: ${gapEdits.length} → Total: ${merged.length}`);
 console.log(`   By type:`, JSON.stringify(byType));
 console.log(`   Estimated time saved: ${result.summary.estimatedTimeSaved}`);
+const silenceMergeCount = merged.filter(e => e.type === 'silence' || e.type === 'silence_merged').length;
+console.log(`📊 Silence merge: ${silenceMergeCount} applied`);
 
 
 // === TEXT → TIMESTAMP MAPPING ===
