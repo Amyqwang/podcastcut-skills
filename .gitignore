@@ -3,3 +3,8 @@
 .DS_Store
 output/
 node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.claude/worktrees/

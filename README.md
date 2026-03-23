@@ -43,13 +43,16 @@ ln -s "$PODCASTCUT_DIR/质检"    ~/.claude/skills/podcastcut-质检
 brew install node ffmpeg
 ```
 
-### 3. 配置阿里云 API Key
+### 3. 配置 ASR API Key
+
+项目支持阿里云 DashScope 和腾讯云 ASR 两种转录服务，在 `config.yaml` 的 `asr.provider` 切换。
 
 ```bash
 cd /path/to/podcastcut
 cp .env.example .env
-# 编辑 .env，填入阿里云 DashScope API Key
-# 获取地址：https://dashscope.console.aliyun.com/
+# 编辑 .env，填入对应的 API Key
+# 阿里云 DashScope：https://dashscope.console.aliyun.com/
+# 腾讯云 ASR：https://console.cloud.tencent.com/cam/capi
 ```
 
 ### 4. 开始使用
@@ -193,7 +196,7 @@ podcastcut/
 | Node.js | 运行脚本 | `brew install node` |
 | FFmpeg | 音频处理（剪辑/EQ/压缩/响度归一化） | `brew install ffmpeg` |
 | Python 3 | 音频剪辑 + 音质增强 | macOS 自带 |
-| 阿里云 DashScope API | 语音转录 + 说话人分离 | [申请 Key](https://dashscope.console.aliyun.com/) |
+| 阿里云 DashScope 或腾讯云 ASR | 语音转录 + 说话人分离 | 见 `config.yaml` 和 `.env.example` |
 | DeepFilterNet（可选） | 音质增强降噪（无则自动跳过） | `pip install deepfilternet` |
 
 ## License

@@ -72,7 +72,9 @@ deepFilter --version
 
 ## 步骤 2: 配置 API Key
 
-### 阿里云 DashScope（语音识别）
+项目支持两种 ASR 服务，在 `config.yaml` 的 `asr.provider` 切换：
+
+### 方案 A：阿里云 DashScope（默认）
 
 控制台：https://dashscope.console.aliyun.com/
 
@@ -80,16 +82,19 @@ deepFilter --version
 2. 开通"模型服务灵积"
 3. 创建 API Key
 
+### 方案 B：腾讯云 ASR
+
+控制台：https://console.cloud.tencent.com/cam/capi
+
+1. 注册腾讯云账号
+2. 创建 SecretId + SecretKey
+
+### 配置
+
 ```bash
 cd "$PODCASTCUT_DIR"
 cp .env.example .env
-# 编辑 .env，填入 API Key
-```
-
-`.env` 文件内容：
-
-```
-DASHSCOPE_API_KEY=sk-your-api-key-here
+# 编辑 .env，填入对应的 API Key（参考 .env.example 中的说明）
 ```
 
 ## 步骤 3: 验证
